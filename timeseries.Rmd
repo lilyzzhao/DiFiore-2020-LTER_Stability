@@ -1,0 +1,196 @@
+---
+title: "Portfolio effects"
+subtitle: "<br/>and ecofolio"
+author: "Megsie Siple"
+institute: "Stier Lab @ UCSB"
+date: "2020-09-15 (updated: `r Sys.Date()`)"
+output:
+  xaringan::moon_reader:
+    lib_dir: libs
+    nature:
+      highlightStyle: github
+      highlightLines: true
+      countIncrementalSlides: false
+---
+
+class: center, middle
+
+# Get Started
+
+---
+
+# Before we start
+
+
+Install the **ecofolio** package from [Github](https://github.com/seananderson/ecofolio):
+
+```{r eval=FALSE, tidy=FALSE}
+devtools::install_github("seananderson/ecofolio")
+```
+
+```{r include=FALSE}
+library(tidyverse)
+```
+
+--
+
+This is a package by Sean Anderson, fisheries and general genius, which calculates different portfolio measures. The paper to cite for the package (and a good one to read for any portfolio paper) is Anderson et al. 2013<sup>1</sup>. 
+
+.footnote[
+[1] Anderson, S.C., A.B. Cooper, N.K. Dulvy. 2013. Ecological prophets: Quantifying metapopulation portfolio effects. Methods in Ecology and Evolution. In Press. doi: 10.1111/2041-210X.12093.
+]
+---
+
+# Dataset
+
+Lily has prepared some LTER fish data, which look like this:
+```{r echo=FALSE, eval=TRUE, tidy=FALSE}
+fish <- read.csv(here::here("data","final_six_fished_unfished.csv"))
+fish %>%
+  mutate(fished = recode(fished, 
+                         no = "unfished",
+                         yes = "fished")) %>%
+  ggplot(aes(x = Year, y = Count_m2, colour = Taxonomy)) +
+  geom_line() +
+  facet_wrap(~fished) +
+  theme_classic(base_size = 16)
+```
+---
+
+# Portfolio effects
+
+Portfolio effects come from financial management - the principle is that the variability in returns from investing in a portfolio of assets is lower than the variability in returns from investing in a single asset.
+
+--
+
+With any set of randomly fluctuating time series, the sum of the time series will be more stable (i.e., have a lower CV) than either of the individual time series.
+
+--
+
+Ecologists have applied this principle to:
+
+- Subpopulations of the same species (Schindler et al. 2015, Siple & Francis 2016)
+- Species in a multispecies complex (with caveats, see later slides)
+- Life history types in a single population 
+
+---
+
+# An example 
+
+In just the unfished stocks from the LTER dataset, 
+```{r echo=TRUE,include=TRUE}
+cv <- function(x){sd(x)/mean(x)}
+cbinotatus_cv <- fish %>% 
+  filter(Taxonomy == "Ctenochaetus binotatus") %>% 
+  summarize(CV = cv(Count_m2))
+allspecies_cv <- fish %>%
+  filter(fished == "no") %>%
+  group_by(Year) %>%
+  summarize(tot_density = sum(Count_m2)) %>%
+  summarize(CV = cv(tot_density))
+
+cat('single species CV: ',cbinotatus_cv$CV, 'whole portfolio CV: ', allspecies_cv$CV)
+```
+
+---
+
+# How can we quantify the benefit of one additional population?
+
+A portfolio will always be more stable than its individual components. But how much more stable? It is helpful to be able to measure the proportional contribution of one added subpopulation or stock to the portfolio.
+
+--
+
+People usually do this by comparing the CV of the portfolio to the mean of the CVs of the individual assets, i.e., 
+
+$$\frac{(CV_{i=1} + CV_{i=2} + CV_{i=3})/3}{CV_{p}}$$
+
+where $p$ is the portfolio of all the subpopulations $i$.
+
+---
+
+# How can we quantify the benefit of one additional population?
+
+## Average-CV portfolio effect
+
+For our fish example,
+
+```{r echo=TRUE,warnings=FALSE}
+# calculate CVs of each "asset" (= species)
+species_cvs <- fish %>%
+  filter(fished == "no") %>%
+  group_by(Taxonomy) %>%
+  summarize(CV = cv(Count_m2))
+```
+
+The average-CV portfolio effect is:
+```{r}
+mean(species_cvs$CV) / allspecies_cv$CV
+```
+
+---
+
+# Which portfolio metric should be used?
+
+Financial portfolios and ecological portfolios scale differently with asset size/population size.
+
+In **financial portfolios**, as asset size (analogous to population size in our ecological example) increases, its variance increases linearly (if you plotted $log(\mu_i)$ vs $log(\sigma_i)$ for all your assets (`i` is each asset), it would be linear with a slope of $z \approx 2$) 
+
+--
+
+But in **ecological systems**, as population size increases, variance increases non-linearly according to Taylor's power law
+
+--
+
+## How does this impact our PE calculations?
+
+If we use the average-CV, we may overestimate the size of the portfolio effect, attributing more stability to the population than is actually added by the presence of multiple subpopulations. Especially if the slope of $log(\mu_i)$ vs $log(\sigma_i)$ is $< 2$. 
+
+---
+
+# Mean-variance portfolio effect
+
+The mean-variance portfolio effect allows for the non-linearity that we see in ecological systems (i.e., it allows $z$ to be different from 2). 
+
+The mean-variance PE is based on the linear relationship between $log(\mu_i)$ and $log(\sigma_i)$
+
+$$log(\sigma_i^2) = \beta_0 + z \cdot log(\mu_i)+\epsilon_i$$
+The method fits $\beta_0$, $z$, and the variance of $\epsilon_i$. Then you predict a variance $\hat\sigma^2$, given that linear relationship. The PE is measured as  $\hat\sigma^2 - \sigma^2$, where $\sigma^2$ is the observed variance of the whole metapopulation or portfolio. 
+
+---
+
+# The `ecofolio` package
+
+`ecofolio` allows you to quickly calculate PEs by both methods.
+
+The example dataset in `ecofolio` is salmon from different streams. The data are set up so the first column is the time increment and the other columns are abundances or biomass or whatever your ecological asset is.
+
+```{r echo=FALSE}
+library(ecofolio)
+data(pinkbr)
+head(pinkbr)
+```
+Yay salmon!
+
+---
+
+# The `ecofolio` package cont'd
+
+The package has two functions `pe_mv()` and `pe_avg_cv()`. 
+With the pink salmon data, these are simply:
+
+```{r}
+pe_avg_cv(pinkbr[,-1],ci = TRUE)
+pe_mv(pinkbr[,-1],ci = TRUE)
+```
+
+---
+
+# The `ecofolio` package cont'd
+
+You can also use `ecofolio` to plot the relationship between mean and variance.
+
+```{r echo=FALSE,fig.height=5}
+plot_mv(pinkbr[,-1], show = "linear", ci = TRUE)
+```
+
+Now we can try it out with our real-life example.
